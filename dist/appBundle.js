@@ -1650,6 +1650,452 @@ var APP_com_dilaila_app_TicTacToe = (function () {
 	  return new app(appSettings)
 	};
 
+	class Splash extends Lightning.Component {
+	  static _template() {
+	    return {
+	      Logo: {
+	        x: 960, y: 540, mount: 0.5,
+	        text: { text: 'LOADING...', fontFace: 'neufreit'}
+	      }
+	    }
+	  }
+
+	  // hook will be called when a component is attached for the first time. DEFINES ANIMATION
+	  _init() {
+	    // create animation and store reference -> we will start / stop/ pause in the future
+	    this._pulse = this.tag("Logo").animation({
+	      duration: 4, repeat: 0, actions: [
+	        { p:'alpha', v:{ 0:0, 1:0.5, 1:0 } }
+	      ]
+	    });
+
+	    // add a finish eventlistener -> signal the parent when animation is completed
+	    this._pulse.on("finish", () => {
+	      this.signal("loaded");
+	    });
+
+	    // start animation
+	    this._pulse.start();
+	  }
+
+	  // hook will be called when a component is activated, visible and on screen. STARTS ANIMATION
+	  _active() {
+	    this._pulse.start();
+	  }
+	}
+
+	class Item extends Lightning.Component{
+
+	  static _template() {
+	    return {
+	      text: { text: '', fontFace: 'neufreit', fontSize:50 }
+	    }
+	  }
+
+	  // will be automatically called
+	  set label(v) {
+	    this.text.text = v;
+	  }
+
+	  // will be automatically called
+	  set action(v) {
+	    this._action = v;
+	  }
+
+	  // will be automatically called
+	  get action() {
+	    return this._action;
+	  }
+	}
+
+	class Menu extends Lightning.Component {
+	  static _template() {
+	    return {
+	      // define empty holder for our items - position relative to component
+	      Items: {
+	        x: 40
+	      },
+	      // text component that indicates which item has focus
+	      FocusIndicator: {
+	        y: 5,
+	        text: {text:'>', fontFace:'neufreit'}
+	      }
+	    }
+	  }
+
+	  _init() {
+	    // create a blinking animation
+	    this._blink = this.tag("FocusIndicator").animation({
+	      duration:0.5, repeat:-1, actions:[
+	        { p:'x', v:{0:0, 0.5:-40,1:0} }
+	      ]
+	    });
+
+	    // current focused menu index
+	    this._index = 0;
+	  }
+
+	  _active() {
+	    this._blink.start();
+	  }
+
+	  _inactive() {
+	    this._blink.stop();
+	  }
+
+	  set items(v) {
+	    this.tag("Items").children = v.map((el, idx)=>{
+	      return {type: Item, action: el.action, label: el.label, y: idx*90}
+	    });
+	  }
+
+	  get items() {
+	    return this.tag("Items").children;
+	  }
+
+	  get activeItem() {
+	    return this.items[this._index];
+	  }
+
+	  _setIndex(idx) {
+	    // since it's a one time transition we use smooth
+	    this.tag("FocusIndicator").setSmooth("y", idx*90 + 5);
+
+	    // store new index
+	    this._index = idx;
+	  }
+
+	  _handleUp(){
+	    this._setIndex(Math.max(0, --this._index));
+	  }
+
+	  _handleDown(){
+	    this._setIndex(Math.min(++this._index, this.items.length - 1));
+	  }
+
+	}
+
+	class Main extends Lightning.Component {
+	  static _template(){
+	    return {
+	      Menu:{
+	        x: 600, y:400,
+	        type: Menu, items:[
+	          {label:'START NEW GAME', action:'start'},
+	          {label:'CONTINUE', action:'continue'},
+	          {label:'ABOUT', action:'about'},
+	          {label:'EXIT', action:'exit'}
+	        ]
+	      }
+	    }
+	  }
+
+	  _getFocused(){
+	    return this.tag("Menu");
+	  }
+
+	  _handleEnter(){
+	    this.signal("select", {item: this.tag("Menu").activeItem});
+	  }
+	}
+
+	const getMatchingPatterns = (regex, tiles) => {
+	  const patterns = [
+	    [0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6],
+	    [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]
+	  ];
+	  return patterns.reduce((sets, pattern) => {
+	    const normalized = pattern.map((tileIndex) => {
+	      return tiles[tileIndex];
+	    }).join("");
+	    if (regex.test(normalized)) {
+	      sets.push(pattern);
+	    }
+	    return sets;
+	  }, []);
+	};
+
+	const getFutureWinningIndex = (tiles) => {
+	  let index = -1;
+	  const player = /(ex{2}|x{2}e|xex)/i;
+	  const ai = /(e0{2}|0{2}e|0e0)/i;
+
+	  // since we're testing for ai we give prio to letting ourselves win
+	  // instead of blocking the potential win for the player
+	  const set = [
+	    ...getMatchingPatterns(player, tiles),
+	    ...getMatchingPatterns(ai, tiles)
+	  ];
+
+	  if (set.length) {
+	    set.pop().forEach((tileIndex) => {
+	      if (tiles[tileIndex] === 'e') {
+	        index = tileIndex;
+	      }
+	    });
+	  }
+
+	  return index;
+	};
+
+	var Utils$1 = {
+	  AI:(tiles)=>{
+	    const mostLogicalIndex = getFutureWinningIndex(tiles);
+	    if (mostLogicalIndex !== -1) {
+	      return mostLogicalIndex;
+	    } else {
+	      const opt = tiles.map((el, idx) => {
+	        if (el === "e") return idx;
+	      }).filter(Boolean);
+
+	      // test for tie
+	      if (!opt.length) {
+	        return -1;
+	      }
+	      return opt[~~(Math.random() * opt.length)];
+	    }
+	  },
+	  getWinner: (tiles) => {
+	    const regex = /(x{3}|0{3})/i;
+	    const set = getMatchingPatterns(regex, tiles);
+	    if (set) {
+	      return tiles[set.join("")[0]];
+	    }
+	    return false;
+	  }
+	};
+
+	class Game extends Lightning.Component {
+	  static _template(){
+	    return {
+	      Game: {
+	        PlayerPosition:{
+	          rect: true, w: 250, h: 250, color: 0x40ffffff,
+	          x: 425, y: 125
+	        },
+	        Field: {
+	          x: 400, y: 100,
+	          children:[
+	            {rect: true, w: 1, h: 5, y: 300},
+	            {rect: true, w:1, h:5, y:600},
+	            {rect: true, h:1, w:5, x:300, y:0},
+	            {rect: true, h:1, w:5, x:600, y:0}
+	          ]
+	        },
+	        Markers: {
+	          x: 400, y: 100
+	        },
+	        ScoreBoard: { x: 100, y: 170,
+	          Player: {
+	            text:{text:'Player 0', fontSize:29, fontFace:'neufreit'}
+	          },
+	          Ai: { y: 40,
+	            text:{text:'Computer 0', fontSize:29, fontFace:'neufreit'}
+	          }
+	        }
+	      },
+	      Notification: {
+	        x: 100, y:170, text:{fontSize:70, fontFace:'neufreit'}, alpha: 0
+	      }
+	    }
+	  }
+
+	  _construct(){
+	    // current player tile index
+	    this._index = 0;
+
+	    // computer score
+	    this._aiScore = 0;
+
+	    // player score
+	    this._playerScore = 0;
+	  }
+
+	  _active() {
+	    this._reset();
+
+	    // we iterate over the outlines of the field and do a nice
+	    // transition of the width / height, so it looks like the
+	    // lines are being drawn realtime.
+
+	    this.tag("Field").children.forEach((el, idx)=>{
+	      el.setSmooth(idx<2?"w":"h", 900, {duration:0.7, delay:idx*0.15});
+	    });
+	  }
+
+	  _reset() {
+	    // reset tiles
+	    this._tiles = [
+	      'e','e','e','e','e','e','e','e','e'
+	    ];
+
+	    // force render
+	    this.render(this._tiles);
+
+	    // change back to root state
+	    this._setState("");
+	  }
+
+	  render(tiles){
+	    this.tag("Markers").children = tiles.map((el, idx)=>{
+	      return {
+	        x: idx%3*300 + 110,
+	        y: ~~(idx/3)*300 + 90,
+	        text:{text:el === "e" ? '' : `${el}`, fontSize:100},
+	      }
+	    });
+	  }
+
+	  _handleUp(){
+	    let idx = this._index;
+	    if(idx-3 >= 0){
+	      this._setIndex(idx-3);
+	    }
+	  }
+
+	  _handleDown(){
+	    let idx = this._index;
+	    if(idx+3 <= this._tiles.length - 1){
+	      this._setIndex(idx+3);
+	    }
+	  }
+
+	  _handleLeft(){
+	    let idx = this._index;
+	    if(idx%3){
+	      this._setIndex(idx - 1);
+	    }
+	  }
+
+	  _handleRight(){
+	    const newIndex = this._index + 1;
+	    if(newIndex%3){
+	      this._setIndex(newIndex);
+	    }
+	  }
+
+	  _setIndex(idx){
+	    this.tag("PlayerPosition").patch({
+	      smooth:{
+	        x: idx%3*300 + 425,
+	        y: ~~(idx/3)*300 + 125
+	      }
+	    });
+	    this._index = idx;
+	  }
+
+	  _handleEnter(){
+	    if(this._tiles[this._index] === "e"){
+	      if(this.place(this._index, "X")){
+	        this._setState("Computer");
+	      }
+	    }
+	  }
+
+	  place(index, marker){
+	    this._tiles[index] = marker;
+	    this.render(this._tiles);
+
+	    const winner = Utils$1.getWinner(this._tiles);
+	    if(winner){
+	      this._setState("End.Winner",[{winner}]);
+	      return false;
+	    }
+
+	    return true;
+	  }
+
+	  static _states() {
+	    return [
+	      class Computer extends this {
+	        $enter(){
+	          const position = Utils$1.AI(this._tiles);
+	          if(position === -1){
+	            this._setState("End.Tie");
+	            return false;
+	          }
+
+	          setTimeout(()=>{
+	            if(this.place(position,"0")){
+	              this._setState("");
+	            }
+	          }, ~~(Math.random()*1200)+200);
+
+	          this.tag("PlayerPosition").setSmooth("alpha",0);
+	        }
+
+	        // make sure we don't handle
+	        // any keypresses when the computer is playing
+	        // _captureKey({keyCode){ }
+
+	        $exit(){
+	          this.tag("PlayerPosition").setSmooth("alpha",1);
+	        }
+	      },
+
+	      class End extends this{
+	        _handleEnter(){
+	          this._reset();
+	        }
+	        $exit(){
+	          this.patch({
+	            Game:{
+	              smooth:{alpha:1}
+	            },
+	            Notification: {
+	              text:{text:''},
+	              smooth:{alpha:0}
+	            }
+	          });
+	        }
+
+	        // SUB STATES
+	        static _states(){
+	          return [
+
+	            class Winner extends this {
+	              $enter(args, {winner}){
+	                if(winner === 'X'){
+	                  this._playerScore+=1;
+	                }else {
+	                  this._aiScore+=1;
+	                }
+	                this.patch({
+	                  Game:{
+	                    smooth:{alpha:0},
+	                    ScoreBoard:{
+	                      Player:{text:{text:`Player ${this._playerScore}`}},
+	                      Ai:{text:{text:`Computer ${this._aiScore}`}},
+	                    }
+	                  },
+	                  Notification: {
+	                    text:{text:`${winner==='X'?`Player`:`Computer`} wins (press enter to continue)`},
+	                    smooth:{alpha:1}
+	                  }
+	                });
+	              }
+	            },
+
+	            class Tie extends this {
+	              $enter(){
+	                this.patch({
+	                  Game: {
+	                    smooth: {alpha: 0}
+	                  },
+	                  Notification: {
+	                    text:{text:`Tie :( (press enter to try again)`},
+	                    smooth:{alpha:1}
+	                  }
+	                });
+	              }
+	            }
+	          ]
+	        }
+	      }
+	    ]
+	  }
+	}
+
 	/*
 	 * If not stated otherwise in this file or this component's LICENSE file the
 	 * following copyright and licenses apply:
@@ -1671,52 +2117,97 @@ var APP_com_dilaila_app_TicTacToe = (function () {
 
 	class App extends Lightning.Component {
 	  static getFonts() {
-	    return [{ family: 'Regular', url: Utils.asset('fonts/Roboto-Regular.ttf') }]
+	    return [
+	      { family: 'neufreit', url: Utils.asset('fonts/neufreit.otf'), descriptor: {} }
+	    ]
 	  }
+
 
 	  static _template() {
 	    return {
-	      Background: {
-	        w: 1920,
-	        h: 1080,
-	        color: 0xfffbb03b,
-	        src: Utils.asset('images/background.png'),
+	      Logo:{
+	        x: 100, y:100, text:{text:'TicTacToe', fontFace:'neufreit'}
 	      },
-	      Logo: {
-	        mountX: 0.5,
-	        mountY: 1,
-	        x: 960,
-	        y: 600,
-	        src: Utils.asset('images/logo.png'),
+	      rect: true, color: 0xff000000,
+	      Splash: {
+	        type: Splash, signals: {loaded: true}, alpha: 0
 	      },
-	      Text: {
-	        mount: 0.5,
-	        x: 960,
-	        y: 720,
-	        text: {
-	          text: "Let's start Building!",
-	          fontFace: 'Regular',
-	          fontSize: 64,
-	          textColor: 0xbbffffff,
-	        },
+	      Main: {
+	        type: Main, alpha: 0, signals: {select: "menuSelect"}
 	      },
+	      Game:{
+	        type: Game, alpha: 0
+	      }
 	    }
 	  }
 
-	  _init() {
-	    this.tag('Background')
-	      .animation({
-	        duration: 15,
-	        repeat: -1,
-	        actions: [
-	          {
-	            t: '',
-	            p: 'color',
-	            v: { 0: { v: 0xfffbb03b }, 0.5: { v: 0xfff46730 }, 0.8: { v: 0xfffbb03b } },
-	          },
-	        ],
-	      })
-	      .start();
+	  _setup() {
+	    this._setState("Splash");
+	  }
+
+	  static _states() {
+	    return [
+
+	      class Splash extends this {
+	        $enter() {
+	          this.tag("Splash").setSmooth("alpha", 1);
+	        }
+
+	        $exit() {
+	          this.tag("Splash").setSmooth("alpha", 0);
+	        }
+
+	        // !! because we have defined 'loaded'
+	        loaded() {
+	          this._setState("Main");
+	        }
+	      },
+
+	      class Main extends this {
+	        $enter() {
+	          this.tag("Main").patch({
+	            smooth: {alpha: 1, y: 0}
+	          });
+	        }
+
+	        $exit() {
+	          this.tag("Main").patch({
+	            smooth: {alpha: 0, y: 100}
+	          });
+	        }
+
+	        menuSelect({item}) {
+	          if (this._hasMethod(item.action)) {
+	            return this[item.action]();
+	          }
+	        }
+
+	        start() {
+	          this._setState("Game");
+	        }
+
+
+	        // change focus path to main component which handles the remote control
+	        // the components may delegate focus to descendants.
+	        _getFocused() {
+	          return this.tag("Main");
+	        }
+	      },
+
+	      class Game extends this {
+	        $enter() {
+	          this.tag("Game").setSmooth("alpha", 1);
+	        }
+
+	        $exit() {
+	          this.tag("Game").setSmooth("alpha", 0);
+	        }
+
+	        _getFocused() {
+	          return this.tag("Game");
+	        }
+	      }
+	    ]
 	  }
 	}
 

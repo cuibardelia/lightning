@@ -17,55 +17,103 @@
  * limitations under the License.
  */
 
-import { Lightning, Utils } from 'wpe-lightning-sdk'
+import { Lightning, Utils } from 'wpe-lightning-sdk';
+import Splash from "./Splash.js";
+import Main from "./Main.js";
+import Game from "./Game.js";
 
 export default class App extends Lightning.Component {
   static getFonts() {
-    return [{ family: 'Regular', url: Utils.asset('fonts/Roboto-Regular.ttf') }]
+    return [
+      { family: 'neufreit', url: Utils.asset('fonts/neufreit.otf'), descriptor: {} }
+    ]
   }
+
 
   static _template() {
     return {
-      Background: {
-        w: 1920,
-        h: 1080,
-        color: 0xfffbb03b,
-        src: Utils.asset('images/background.png'),
+      Logo:{
+        x: 100, y:100, text:{text:'TicTacToe', fontFace:'neufreit'}
       },
-      Logo: {
-        mountX: 0.5,
-        mountY: 1,
-        x: 960,
-        y: 600,
-        src: Utils.asset('images/logo.png'),
+      rect: true, color: 0xff000000,
+      Splash: {
+        type: Splash, signals: {loaded: true}, alpha: 0
       },
-      Text: {
-        mount: 0.5,
-        x: 960,
-        y: 720,
-        text: {
-          text: "Let's start Building!",
-          fontFace: 'Regular',
-          fontSize: 64,
-          textColor: 0xbbffffff,
-        },
+      Main: {
+        type: Main, alpha: 0, signals: {select: "menuSelect"}
       },
+      Game:{
+        type: Game, alpha: 0
+      }
     }
   }
 
-  _init() {
-    this.tag('Background')
-      .animation({
-        duration: 15,
-        repeat: -1,
-        actions: [
-          {
-            t: '',
-            p: 'color',
-            v: { 0: { v: 0xfffbb03b }, 0.5: { v: 0xfff46730 }, 0.8: { v: 0xfffbb03b } },
-          },
-        ],
-      })
-      .start()
+  _setup() {
+    this._setState("Splash");
+  }
+
+  static _states() {
+    return [
+
+      class Splash extends this {
+        $enter() {
+          this.tag("Splash").setSmooth("alpha", 1);
+        }
+
+        $exit() {
+          this.tag("Splash").setSmooth("alpha", 0);
+        }
+
+        // !! because we have defined 'loaded'
+        loaded() {
+          this._setState("Main");
+        }
+      },
+
+      class Main extends this {
+        $enter() {
+          this.tag("Main").patch({
+            smooth: {alpha: 1, y: 0}
+          });
+        }
+
+        $exit() {
+          this.tag("Main").patch({
+            smooth: {alpha: 0, y: 100}
+          });
+        }
+
+        menuSelect({item}) {
+          if (this._hasMethod(item.action)) {
+            return this[item.action]();
+          }
+        }
+
+        start() {
+          this._setState("Game")
+        }
+
+
+        // change focus path to main component which handles the remote control
+        // the components may delegate focus to descendants.
+        _getFocused() {
+          return this.tag("Main");
+        }
+      },
+
+      class Game extends this {
+        $enter() {
+          this.tag("Game").setSmooth("alpha", 1);
+        }
+
+        $exit() {
+          this.tag("Game").setSmooth("alpha", 0);
+        }
+
+        _getFocused() {
+          return this.tag("Game");
+        }
+      }
+    ]
   }
 }
